@@ -5,91 +5,26 @@ from werkzeug.utils import secure_filename
 from datetime import datetime
 import os
 
+# 🔹 Configuración básica de Flask
 app = Flask(__name__)
-app.secret_key = "supersecreto123"
-DB_NAME = "database.db"
+app.secret_key = "supersecreto123"  # Clave secreta para sesiones
+DB_NAME = "database.db"  # Nombre de la base de datos SQLite
 
-# Carpeta donde se guardarán los avatares subidos
+# 🔹 Configuración de carpeta para avatars (aunque actualmente no se usan)
 UPLOAD_FOLDER = "static/avatars/"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif"}
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-
+# 🔹 Función para validar extensiones de archivos permitidas
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# 🔹 Función para inicializar y actualizar la base de datos
+# 🔹 Inicializar la base de datos y crear tablas si no existen
 def init_db():
-    db_exists = os.path.exists(DB_NAME)
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    # Usuarios
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            email TEXT UNIQUE,
-            password TEXT
-        )
-    """)
-    
-
-    # Verificar si existen las columnas 'bio' y 'avatar'
-    cursor.execute("PRAGMA table_info(usuarios)")
-    columns = [info[1] for info in cursor.fetchall()]
-    if "bio" not in columns:
-        cursor.execute("ALTER TABLE usuarios ADD COLUMN bio TEXT DEFAULT ''")
-    if "avatar" not in columns:
-        cursor.execute("ALTER TABLE usuarios ADD COLUMN avatar TEXT DEFAULT ''")
-
-    # Posts
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS posts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            titulo TEXT,
-            contenido TEXT,
-            fecha TEXT
-        )
-    """)
-    cursor.execute("PRAGMA table_info(posts)")
-    post_columns = [info[1] for info in cursor.fetchall()]
-    if "etiquetas" not in post_columns:
-        cursor.execute("ALTER TABLE posts ADD COLUMN etiquetas TEXT DEFAULT ''")
-
-    # Comentarios
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS comentarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            post_id INTEGER,
-            user_id INTEGER,
-            contenido TEXT,
-            fecha TEXT,
-            FOREIGN KEY (post_id) REFERENCES posts(id),
-            FOREIGN KEY (user_id) REFERENCES usuarios(id)
-        )
-    """)
-
-    # Likes
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS likes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            post_id INTEGER,
-            user_id INTEGER,
-            FOREIGN KEY (post_id) REFERENCES posts(id),
-            FOREIGN KEY (user_id) REFERENCES usuarios(id)
-        )
-    """)
-
-    conn.commit()
-    conn.close()
-
-    db_exists = os.path.exists(DB_NAME)
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    # Usuarios
+    # Tabla de usuarios
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,24 +36,19 @@ def init_db():
         )
     """)
 
-    # Posts
+    # Tabla de posts
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS posts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
             titulo TEXT,
             contenido TEXT,
-            fecha TEXT
+            fecha TEXT,
+            etiquetas TEXT DEFAULT ''
         )
     """)
 
-    # Verificar si la columna etiquetas existe
-    cursor.execute("PRAGMA table_info(posts)")
-    columns = [info[1] for info in cursor.fetchall()]
-    if "etiquetas" not in columns:
-        cursor.execute("ALTER TABLE posts ADD COLUMN etiquetas TEXT DEFAULT ''")
-
-    # Comentarios
+    # Tabla de comentarios
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS comentarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,7 +61,7 @@ def init_db():
         )
     """)
 
-    # Likes
+    # Tabla de likes
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS likes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,27 +75,30 @@ def init_db():
     conn.commit()
     conn.close()
 
-# Inicializar la base de datos
+# 🔹 Inicializar base de datos al iniciar la app
 init_db()
 
+# 🔹 Función global para inyectar información del usuario en todas las plantillas
 @app.context_processor
 def inject_user():
     user_data = None
     if "user_id" in session:
-        conn = sqlite3.connect("database.db")
+        conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute("SELECT id, username, email, bio, avatar FROM usuarios WHERE id=?", (session["user_id"],))
         user_data = cursor.fetchone()
         conn.close()
     return dict(current_user=user_data, current_year=datetime.utcnow().year)
 
-
-# 🔹 Login / Registro
+# 🔹 Rutas de autenticación
 @app.route("/")
 def home():
+    # Redirige al login si no hay sesión, sino al index
     return redirect("/login") if "user_id" not in session else redirect("/index")
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    # Registro de usuario
     if request.method == "POST":
         username = request.form["username"]
         email = request.form["email"]
@@ -188,9 +121,9 @@ def register():
 
     return render_template("register.html")
 
-
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    # Login de usuario
     if request.method == "POST":
         username = request.form["username"]
         password = request.form["password"]
@@ -210,12 +143,15 @@ def login():
 
 @app.route("/logout")
 def logout():
+    # Cierra sesión del usuario
     session.clear()
     flash("Has cerrado sesión", "info")
     return redirect("/login")
 
+# 🔹 Página principal
 @app.route("/index")
 def index():
+    # Asegura que el usuario esté logueado
     if "user_id" not in session:
         flash("Debes iniciar sesión", "warning")
         return redirect("/login")
@@ -241,35 +177,7 @@ def index():
     conn.close()
     return render_template("index.html", usuario=session.get("username"), posts=posts, search=search, datetime=datetime)
 
-    if "user_id" not in session:
-        flash("Debes iniciar sesión", "warning")
-        return redirect("/login")
-    
-    search = request.args.get("search", "")
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    query = """
-SELECT posts.id, posts.titulo, posts.contenido, posts.fecha, usuarios.username,
-       (SELECT COUNT(*) FROM likes WHERE post_id=posts.id) as likes_count,
-       (SELECT COUNT(*) FROM comentarios WHERE post_id=posts.id) as comentarios_count
-FROM posts
-JOIN usuarios ON posts.user_id=usuarios.id
-"""
-
-
-    if search:
-        query += " WHERE posts.titulo LIKE ? OR posts.contenido LIKE ?"
-        cursor.execute(query + " ORDER BY posts.id DESC", (f"%{search}%", f"%{search}%"))
-    else:
-        cursor.execute(query + " ORDER BY posts.id DESC")
-    
-    posts = cursor.fetchall()
-    conn.close()
-    return render_template("index.html", posts=posts, search=search)
-
-
-# 🔹 Crear post
+# 🔹 Crear un nuevo post
 @app.route("/create_post", methods=["GET", "POST"])
 def create_post():
     if "user_id" not in session:
@@ -292,7 +200,7 @@ def create_post():
         return redirect("/index")
     return render_template("create_post.html")
 
-# 🔹 Ver post individual + comentarios
+# 🔹 Ver post individual y sus comentarios
 @app.route("/view_post/<int:post_id>", methods=["GET", "POST"])
 def view_post(post_id):
     if "user_id" not in session:
@@ -308,7 +216,7 @@ def view_post(post_id):
         WHERE posts.id=?
     """, (post_id,))
     post = cursor.fetchone()
-    # Comentarios
+    # Obtener comentarios
     cursor.execute("""
         SELECT comentarios.id, comentarios.contenido, comentarios.fecha, usuarios.username, comentarios.user_id
         FROM comentarios JOIN usuarios ON comentarios.user_id=usuarios.id
@@ -316,13 +224,13 @@ def view_post(post_id):
         ORDER BY comentarios.id ASC
     """, (post_id,))
     comentarios = cursor.fetchall()
-    # Verificar like del usuario actual
+    # Verificar si el usuario actual dio like
     cursor.execute("SELECT * FROM likes WHERE post_id=? AND user_id=?", (post_id, session["user_id"]))
     liked = cursor.fetchone() is not None
     conn.close()
     return render_template("view_post.html", post=post, comentarios=comentarios, liked=liked)
 
-# 🔹 Añadir comentario
+# 🔹 Añadir comentario a un post
 @app.route("/add_comment/<int:post_id>", methods=["POST"])
 def add_comment(post_id):
     if "user_id" not in session:
@@ -340,7 +248,7 @@ def add_comment(post_id):
     flash("Comentario agregado", "success")
     return redirect(f"/view_post/{post_id}")
 
-# 🔹 Dar like / quitar like
+# 🔹 Dar like o quitar like de un post
 @app.route("/toggle_like/<int:post_id>")
 def toggle_like(post_id):
     if "user_id" not in session:
@@ -357,18 +265,17 @@ def toggle_like(post_id):
     conn.close()
     return redirect(f"/view_post/{post_id}")
 
+# 🔹 Página de perfil del usuario (sin avatar)
 @app.route("/profile/<int:user_id>")
 def profile(user_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-
-    # Información del usuario (sin avatar)
     cursor.execute("SELECT id, username, email, bio FROM usuarios WHERE id=?", (user_id,))
     user = cursor.fetchone()
 
-    # Posts del usuario con conteo de likes y comentarios
+    # Obtener posts del usuario
     cursor.execute("""
-        SELECT p.id, p.titulo, p.fecha,
+        SELECT p.id, p.titulo, p.contenido, p.fecha,
                (SELECT COUNT(*) FROM comentarios c WHERE c.post_id=p.id) AS comentarios_count,
                (SELECT COUNT(*) FROM likes l WHERE l.post_id=p.id) AS likes_count
         FROM posts p
@@ -376,17 +283,14 @@ def profile(user_id):
         ORDER BY p.fecha DESC
     """, (user_id,))
     posts = cursor.fetchall()
-
     conn.close()
     return render_template("profile.html", user=user, posts=posts)
 
-
+# 🔹 Editar post existente
 @app.route("/post/<int:post_id>/edit", methods=["GET", "POST"])
 def edit_post(post_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    
-    # Obtener datos del post
     cursor.execute("SELECT titulo, contenido FROM posts WHERE id=?", (post_id,))
     post = cursor.fetchone()
 
@@ -401,28 +305,31 @@ def edit_post(post_id):
     
     conn.close()
     return render_template("edit_post.html", post=post)
-
-
-@app.route("/post/<int:post_id>/delete", methods=["POST"])
+# 🔹 Borrar post vía AJAX
+@app.route("/post/<int:post_id>/delete", methods=["DELETE"])
 def delete_post(post_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # Opcional: verificar que el usuario sea dueño del post
+    # Verificar que el post pertenece al usuario
     cursor.execute("SELECT user_id FROM posts WHERE id=?", (post_id,))
     post_user = cursor.fetchone()
-    if post_user and post_user[0] != session.get("user_id"):
-        flash("No puedes borrar este post", "danger")
-        return redirect(url_for("profile", user_id=session.get("user_id")))
+    if not post_user:
+        conn.close()
+        return {"status": "error", "message": "Post no encontrado"}, 404
 
+    if post_user[0] != session.get("user_id"):
+        conn.close()
+        return {"status": "error", "message": "No puedes borrar este post"}, 403
+
+    # Borrar post
     cursor.execute("DELETE FROM posts WHERE id=?", (post_id,))
     conn.commit()
     conn.close()
-    flash("Post eliminado exitosamente", "success")
-    return redirect(url_for("profile", user_id=session.get("user_id")))
 
+    return {"status": "success", "message": "Post eliminado exitosamente"}
 
-# 🔹 Acerca de
+# 🔹 Página "Acerca de"
 @app.route("/about")
 def about():
     if "user_id" in session:
@@ -434,6 +341,6 @@ def about():
         return render_template("about.html", user=user)
     return render_template("about.html", user=None)
 
-
+# 🔹 Ejecutar app
 if __name__ == "__main__":
     app.run(debug=True)
